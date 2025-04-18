@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 from datetime import timedelta
 from pathlib import Path
-
+import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 AUTH_USER_MODEL = 'account.User'
@@ -80,9 +80,10 @@ WSGI_APPLICATION = 'kernel.wsgi.application'
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'NAME': BASE_DIR / 'db.sqlite3', 
     }
 }
+
 
 AUTH_USER_MODEL = 'account.User'
 # Password validation
@@ -133,6 +134,7 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticated',
     ),
 }
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # JWT settings
 SIMPLE_JWT = {
@@ -149,7 +151,7 @@ SIMPLE_JWT = {
     'TOKEN_TYPE_CLAIM': 'token_type',
     'JTI_CLAIM': 'jti',
 }
-# برای محیط توسعه
+
 CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
@@ -157,5 +159,4 @@ CACHES = {
     }
 }
 
-# مدت زمان نگهداری OTP (اختیاری)
-CACHE_TTL = 300  # ۵ دقیقه
+CACHE_TTL = 300 
