@@ -99,8 +99,6 @@ db.sqlite3
 ### Docker ###
 .dockerignore
 entrypoint.sh
-Dockerfile
-docker-compose.yml
 
 ### Docs ###
 !docs/**

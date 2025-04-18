@@ -1,0 +1,20 @@
+version: "3"
+services:
+
+  web:
+    build: .
+    command: gunicorn your_project_name.wsgi:application --bind 0.0.0.0:8000
+    volumes:
+      - .:/app
+      - ./db:/app/db  # Directory for storing the SQLite database file
+    ports:
+      - "8000:8000"
+    networks:
+      - mynetwork
+
+volumes:
+  db:  # This volume ensures the SQLite database persists across container restarts
+
+networks:
+  mynetwork:
+    driver: bridge  # Default network driver for the container
