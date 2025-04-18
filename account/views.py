@@ -1,33 +1,29 @@
 # accounts/views.py
+
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from .models import User
 from .otp_utils import generate_otp, verify_otp, send_otp_sms
-from .utils import increase_attempt, is_blocked
+from .utils import increase_attempt, is_blocked, get_tokens_for_user
 from django.contrib.auth import authenticate
 from rest_framework import status
 import uuid
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from django.contrib.auth import authenticate
-from .models import User
-from .utils import get_tokens_for_user, is_blocked, increase_attempt
 from django.core.cache import cache
-from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny
-from rest_framework.response import Response
-from rest_framework import status
-from .models import User
-from .otp_utils import verify_otp
-from .utils import is_blocked, increase_attempt, get_tokens_for_user
-
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def check_phone_or_send_otp(request):
+    """
+    Check if the phone number is registered. If not, send OTP for verification.
+
+    Args:
+        request (Request): The request object containing the phone number.
+
+    Returns:
+        Response: API response indicating whether the phone exists or OTP was sent.
+    """
     phone = request.data.get("phone")
     ip = request.META.get('REMOTE_ADDR')
 
@@ -46,7 +42,7 @@ def check_phone_or_send_otp(request):
             return Response({"error": "Too many OTP requests. Please try again later."}, status=429)
 
         # Generate and send OTP
-        otp = send_otp_sms(phone)  # Implement your OTP sending logic
+        otp = send_otp_sms(phone)
         increase_attempt(key)
 
         return Response({
@@ -54,10 +50,18 @@ def check_phone_or_send_otp(request):
             "message": "OTP sent successfully."
         })
 
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify(request):
+    """
+    Verify the OTP entered by the user for phone number verification.
+
+    Args:
+        request (Request): The request object containing the phone number and OTP.
+
+    Returns:
+        Response: API response indicating whether OTP verification was successful.
+    """
     phone = request.data.get("phone")
     code = request.data.get("code")
     ip = request.META.get('REMOTE_ADDR')
@@ -70,22 +74,27 @@ def verify(request):
         increase_attempt(otp_key)
         return Response({"error": "Incorrect OTP."}, status=400)
 
-    # OTP درست بوده → تولید توکن ثبت‌نام
+    # Generate registration token
     reg_token = uuid.uuid4().hex
-    cache.set(f"reg_token:{reg_token}", phone, timeout=10 * 60)  # 10 دقیقه اعتبار
+    cache.set(f"reg_token:{reg_token}", phone, timeout=10 * 60)
 
     return Response({
         "message": "Phone verified.",
         "registration_token": reg_token
     }, status=200)
 
-
-
-
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
+    """
+    Handle user login with phone number and password.
+
+    Args:
+        request (Request): The request object containing the phone number and password.
+
+    Returns:
+        Response: API response indicating login success or failure.
+    """
     phone = request.data.get("phone")
     password = request.data.get("password")
     ip = request.META.get('REMOTE_ADDR')
@@ -93,59 +102,66 @@ def login(request):
     if not phone or not password:
         return Response({"error": "Phone number and password are required."}, status=400)
 
-    # بررسی می‌کنیم که آیا شماره تلفن در دیتابیس وجود دارد یا خیر
+    # Check if user exists
     user = User.objects.filter(phone=phone).first()
 
     if not user:
         return Response({"error": "Phone number not registered."}, status=400)
 
-    # بررسی بلاک بودن کاربر
+    # Check if the user is blocked
     key = f"login_{phone}_{ip}"
     if is_blocked(key):
         return Response({"error": "Temporary access blocked."}, status=403)
 
-    # اعتبارسنجی رمز عبور
+    # Validate password
     user = authenticate(request, phone=phone, password=password)
 
     if user:
         tokens = get_tokens_for_user(user)
         return Response({"message": "Login successful.", "tokens": tokens})
     else:
-        # در صورت وارد کردن رمز عبور اشتباه
         if increase_attempt(key) >= 3:
             return Response({"error": "You are blocked due to too many failed login attempts."}, status=403)
         return Response({"error": "Incorrect password."}, status=401)
 
-
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register_user(request):
+    """
+    Register a new user after phone verification.
+
+    Args:
+        request (Request): The request object containing registration token and user data.
+
+    Returns:
+        Response: API response indicating registration success or failure.
+    """
     reg_token = request.data.get("registration_token")
     password = request.data.get("password")
     first_name = request.data.get("first_name", "")
     last_name = request.data.get("last_name", "")
     email = request.data.get("email", "")
 
-    # چک می‌کنیم توکن معتبر باشه
+    # Validate registration token
     phone = cache.get(f"reg_token:{reg_token}")
     if not phone:
         return Response({"error": "Invalid or expired registration token."}, status=403)
 
-    # نباید کاربر از قبل وجود داشته باشه
+    # Check if user already exists
     if User.objects.filter(phone=phone).exists():
         return Response({"error": "User already exists."}, status=400)
 
     if not password:
         return Response({"error": "Password is required."}, status=400)
 
-    # ایجاد کاربر و ذخیره‌ی اطلاعات
+    # Create and save user
     user = User.objects.create_user(phone=phone, password=password)
     user.first_name = first_name
     user.last_name = last_name
     user.email = email
     user.save()
 
-    # پاک کردن توکن از کش
+    # Delete registration token from cache
     cache.delete(f"reg_token:{reg_token}")
 
     tokens = get_tokens_for_user(user)
@@ -154,10 +170,18 @@ def register_user(request):
         "tokens": tokens
     }, status=201)
 
-
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def refresh_jwt_token(request):
+    """
+    Refresh JWT access token using the provided refresh token.
+
+    Args:
+        request (Request): The request object containing the refresh token.
+
+    Returns:
+        Response: API response with the new access token.
+    """
     refresh_token = request.data.get("refresh")
     if not refresh_token:
         return Response({"error": "Refresh token is required."}, status=400)
@@ -169,10 +193,18 @@ def refresh_jwt_token(request):
     except Exception as e:
         return Response({"error": str(e)}, status=400)
 
-
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def get_user_profile(request):
+    """
+    Retrieve the authenticated user's profile information.
+
+    Args:
+        request (Request): The request object containing user details.
+
+    Returns:
+        Response: API response with user's profile information.
+    """
     user = request.user
     return Response({
         'phone': user.phone,
@@ -181,12 +213,18 @@ def get_user_profile(request):
         'email': user.email,
     })
 
-
-
-
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def update_user_profile(request):
+    """
+    Update the authenticated user's profile information.
+
+    Args:
+        request (Request): The request object containing the new profile data.
+
+    Returns:
+        Response: API response indicating successful profile update.
+    """
     user = request.user
     user.first_name = request.data.get('first_name', user.first_name)
     user.last_name = request.data.get('last_name', user.last_name)
@@ -201,10 +239,18 @@ def update_user_profile(request):
         }
     })
 
-
 @api_view(['DELETE'])
 @permission_classes([IsAuthenticated])
 def delete_user_profile(request):
+    """
+    Delete the authenticated user's profile.
+
+    Args:
+        request (Request): The request object for deleting the profile.
+
+    Returns:
+        Response: API response indicating successful profile deletion.
+    """
     user = request.user
     user.delete()
     return Response({'message': 'User deleted successfully'}, status=status.HTTP_204_NO_CONTENT)
